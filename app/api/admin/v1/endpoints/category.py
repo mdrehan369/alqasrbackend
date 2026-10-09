@@ -5,7 +5,7 @@ from app.core.api_response import ApiResponse
 from app.db.session import get_db
 from app.schemas.category import CategoryResponse, CreateCategoryRequest
 from app.services.category import create_category_service, get_categories_service
-from app.utils.constants import HTTP_STATUS_CODES
+from app.utils.constants import HTTP_RESPONSE_MESSAGES, HTTP_STATUS_CODES
 
 router = APIRouter()
 
@@ -20,6 +20,7 @@ async def create_category_controller(
 ):
     result = await create_category_service(session, payload)
     return ApiResponse[CategoryResponse](
+        message=HTTP_RESPONSE_MESSAGES.CREATED.value,
         data=CategoryResponse.model_validate(result),
     )
 
