@@ -43,7 +43,8 @@ async def test_list_categories_empty_returns_empty_data(client):
     body = response.json()
     assert body["success"] is True
     assert body["message"] == HTTP_RESPONSE_MESSAGES.SUCCESS.value
-    assert body["data"] == []
+    assert body["data"]["items"] == []
+    assert body["data"]["pagination"]["total"] == 0
 
 
 async def test_list_categories_returns_created_items(client):
@@ -55,4 +56,4 @@ async def test_list_categories_returns_created_items(client):
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert {item["name"] for item in body["data"]} == {"perfumes", "aatr"}
+    assert {item["name"] for item in body["data"]["items"]} == {"perfumes", "aatr"}
