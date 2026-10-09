@@ -1,19 +1,10 @@
-from fastapi import Depends, FastAPI
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio.session import AsyncSession
+from fastapi import FastAPI
 
-from app.db.session import get_db
-from app.db.models.product import Product
-from app.api.v1.router import apiRouter
+from .api.admin.v1.router import apiRouter
+from .core.exception_handlers import register_exception_handlers
 
-app = FastAPI(
-            title="Al Qasr Backend",
-            version="1.0.0"
-        )
+app = FastAPI(title="Al Qasr Backend", version="1.0.0")
 
-app.include_router(apiRouter, prefix="/api/v1")
+register_exception_handlers(app)
 
-@app.get("/")
-async def hello():
-    return {"Hello": "World"}
-
+app.include_router(apiRouter, prefix="/api")
