@@ -37,3 +37,9 @@ async def client():
     app.dependency_overrides.clear()
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest_asyncio.fixture
+async def db_session(client):  # noqa: ARG001  ensures tables exist first
+    async with TestSessionLocal() as session:
+        yield session

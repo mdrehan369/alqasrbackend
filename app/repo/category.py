@@ -42,3 +42,20 @@ async def get_categories_repo(
     categories = list(await session.scalars(stmt))
 
     return categories, total or 0
+
+
+async def update_category_repo(session: AsyncSession, category: Category) -> Category:
+    await session.commit()
+    await session.refresh(category)
+
+    return category
+
+
+async def get_category_by_id_repo(session: AsyncSession, id: int) -> Category | None:
+    stmt = select(Category).where(Category.id == id)
+    return await session.scalar(stmt)
+
+
+async def delete_category_repo(session: AsyncSession, category: Category) -> None:
+    await session.delete(category)
+    await session.commit()
