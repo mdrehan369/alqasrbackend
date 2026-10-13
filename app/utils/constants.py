@@ -1,10 +1,17 @@
 from enum import Enum
 
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+MAX_IMAGES_PER_REQUEST = 10
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+IMAGEKIT_FOLDER = "/products"
+
 
 class TABLE_NAMES(Enum):
     PRODUCT = "product"
     PRODUCT_VARIANT = "product_variant"
     CATEGORY = "category"
+    IMAGE = "image"
+    PRODUCT_IMAGE = "product_image"
 
 
 class HTTP_STATUS_CODES(Enum):
@@ -41,3 +48,4 @@ class HTTP_RESPONSE_MESSAGES(Enum):
     BAD_GATEWAY = "BAD GATEWAY"
     SERVICE_UNAVAILABLE = "SERVICE UNAVAILABLE"
     CANNOT_DELETE = "CANNOT_DELETE"
+    FILE_UPLOAD_ERROR = "FILE UPLOAD ERROR"

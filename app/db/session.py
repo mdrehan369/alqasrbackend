@@ -2,9 +2,13 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.settings import get_settings
+
 # 1. Replace with your actual DB credentials (or load from environment variables)
 # Format: postgresql+asyncpg://user:password@host:port/dbname
-DATABASE_URL = "postgresql+asyncpg://postgres:pass1234@localhost:5432/al_qasr_db"
+settings = get_settings()
+
+DATABASE_URL = str(settings.database_url)
 
 # 2. Create the Async Engine
 engine = create_async_engine(

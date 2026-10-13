@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import product as _product_models  # noqa: F401  registers models
+from app.db import models as _models  # noqa: F401  registers models
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
@@ -43,3 +47,24 @@ async def client():
 async def db_session(client):  # noqa: ARG001  ensures tables exist first
     async with TestSessionLocal() as session:
         yield session
+
+
+@pytest.fixture
+def fake_imagekit(monkeypatch):
+    counter = {"n": 0}
+
+    async def upload(**kwargs):
+        counter["n"] += 1
+        n = counter["n"]
+        return SimpleNamespace(
+            file_id=f"file-{n}",
+            url=f"https://ik.example.com/{n}.png",
+            file_path=f"/products/{n}.png",
+        )
+
+    files = SimpleNamespace(upload=AsyncMock(side_effect=upload), delete=AsyncMock())
+    client = SimpleNamespace(files=files)
+
+    monkeypatch.setattr("app.services.image.imagekit_client", client)
+
+    return client

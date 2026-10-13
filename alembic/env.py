@@ -5,14 +5,18 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.core.settings import get_settings
+from app.db import models as _models  # noqa: F401  registers all models
 from app.db.base import Base
-from app.db.models.product import Category, Product, ProductVariant
 
 from alembic import context
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Use the same database URL as the application.
+config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

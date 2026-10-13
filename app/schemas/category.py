@@ -23,5 +23,5 @@ class UpdateCategoryRequest(BaseModel):
     name: str | None = Field(
         default=None,
         description="New category name. Omit or send null to leave it unchanged.",
-        examples=["Aatr"],
+        examples=["Blue Mist"],
     )

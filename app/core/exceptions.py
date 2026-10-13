@@ -60,3 +60,23 @@ class CannotDeleteError(AppError):
         status: int = HTTP_STATUS_CODES.BAD_REQUEST.value,
     ):
         super().__init__(message, code, status)
+
+
+class InvalidFileError(AppError):
+    def __init__(
+        self,
+        message: str,
+        code: str = HTTP_RESPONSE_MESSAGES.VALIDATION_ERROR.value,
+        status: int = HTTP_STATUS_CODES.BAD_REQUEST.value,
+    ):
+        super().__init__(message, code, status)
+
+
+class FileUploadError(AppError):
+    def __init__(
+        self,
+        message: str,
+        code: str = HTTP_RESPONSE_MESSAGES.FILE_UPLOAD_ERROR.value,
+        status: int = HTTP_STATUS_CODES.INTERNAL_SERVER_ERROR.value,
+    ):
+        super().__init__(message, code, status)
