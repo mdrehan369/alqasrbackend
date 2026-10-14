@@ -5,6 +5,7 @@ MAX_IMAGES_PER_REQUEST = 10
 MAX_IMAGES_PER_PRODUCT = 10
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 IMAGEKIT_FOLDER = "/products"
+JWT_ALGORITHM = "HS256"
 
 
 class TABLE_NAMES(Enum):

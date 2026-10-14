@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, PostgresDsn, SecretStr, TypeAdapter
+from pydantic import EmailStr, Field, PostgresDsn, SecretStr, TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_DB = TypeAdapter(PostgresDsn).validate_python(
@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     imagekit_id: SecretStr = Field(default=...)
     imagekit_public_key: SecretStr = Field(default=...)
     imagekit_private_key: SecretStr = Field(default=...)
+
+    admin_email: EmailStr = Field(default=...)
+    admin_password: SecretStr = Field(default=...)
+
+    jwt_secret: SecretStr = Field(default=...)
+    jwt_access_token_expire_minutes: int = Field(default=...)
 
     # Read configuration from a local .env file
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

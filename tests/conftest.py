@@ -7,12 +7,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.settings import get_settings
 from app.db import models as _models  # noqa: F401  registers models
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 
+settings = get_settings()
+
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+AUTH_URL = "/api/v1/admin/auth/"
 
 test_engine = create_async_engine(
     TEST_DATABASE_URL,
@@ -36,11 +40,31 @@ async def client():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
+        response = await ac.post(
+            AUTH_URL,
+            json={
+                "email": str(settings.admin_email),
+                "password": settings.admin_password.get_secret_value(),
+            },
+        )
+        assert response.status_code == 200, response.text
+        ac.headers["Authorization"] = (
+            f"Bearer {response.json()['data']['access_token']}"
+        )
+
         yield ac
 
     app.dependency_overrides.clear()
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest_asyncio.fixture
+async def unauth_client(client):  # noqa: ARG001  ensures tables + overrides are ready
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        yield ac
 
 
 @pytest_asyncio.fixture

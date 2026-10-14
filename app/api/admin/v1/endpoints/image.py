@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.admin.v1.endpoints.auth import get_current_user_controller
 from app.core.api_response import ApiResponse, ErrorResponse
 from app.db.session import get_db
 from app.schemas.image import ImageResponse
 from app.services.image import upload_images_service
 from app.utils.constants import HTTP_RESPONSE_MESSAGES, HTTP_STATUS_CODES
 
-router = APIRouter(tags=["Image"])
+router = APIRouter(tags=["Image"], dependencies=[Depends(get_current_user_controller)])
 
 
 @router.post(
