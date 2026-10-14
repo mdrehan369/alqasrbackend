@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.health import router as health_router
 from app.core.settings import get_settings
 
 from .api.admin.v1.router import api_router
@@ -31,9 +32,14 @@ app = FastAPI(
             "name": "Product",
             "description": "Create and manage products with variants and images.",
         },
+        {
+            "name": "Health",
+            "description": "Liveness and readiness probes for the service.",
+        },
     ],
 )
 
 register_exception_handlers(app)
 
+app.include_router(health_router, prefix="/api")
 app.include_router(api_router, prefix="/api")

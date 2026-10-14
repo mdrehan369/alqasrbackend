@@ -142,7 +142,11 @@ async def test_get_me_with_token_missing_claims_returns_401(unauth_client):
 
 
 async def test_get_me_with_wrong_secret_returns_401(unauth_client):
-    token = jwt.encode(_claims(), "a-totally-different-secret", algorithm=JWT_ALGORITHM)
+    token = jwt.encode(
+        _claims(),
+        "a-totally-different-secret-that-is-long-enough-1234",
+        algorithm=JWT_ALGORITHM,
+    )
 
     response = await unauth_client.get(ME_URL, headers=_bearer(token))
 

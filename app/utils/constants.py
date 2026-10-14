@@ -6,6 +6,14 @@ MAX_IMAGES_PER_PRODUCT = 10
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 IMAGEKIT_FOLDER = "/products"
 JWT_ALGORITHM = "HS256"
+HEALTH_CHECK_TIMEOUT_SECONDS = 3
+
+
+class HEALTH_STATUS(Enum):
+    UP = "up"
+    DOWN = "down"
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
 
 
 class TABLE_NAMES(Enum):
