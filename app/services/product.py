@@ -1,3 +1,4 @@
+from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +9,19 @@ from app.core.exceptions import (
     ResourceNotFoundError,
 )
 from app.repo.category import get_category_by_id_repo
-from app.repo.image import create_product_images_repo, get_images_by_ids_repo
+from app.repo.image import (
+    count_product_images_repo,
+    create_product_image_repo,
+    create_product_images_repo,
+    delete_image_repo,
+    delete_product_image_repo,
+    get_images_by_ids_repo,
+    get_lowest_order_product_image_repo,
+    get_max_display_order_repo,
+    get_product_image_by_id_repo,
+    shift_product_images_repo,
+    unset_primary_image_repo,
+)
 from app.repo.product import (
     create_product_repo,
     create_product_variant_repo,
@@ -25,9 +38,12 @@ from app.repo.product import (
 from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
+    UpdateProductImageRequest,
     UpdateProductRequest,
     UpdateProductVariantRequest,
 )
+from app.services.image import delete_imagekit_file, upload_image_service
+from app.utils.constants import MAX_IMAGES_PER_PRODUCT
 
 
 async def create_product_service(session: AsyncSession, payload: CreateProductRequest):
@@ -47,6 +63,8 @@ async def create_product_service(session: AsyncSession, payload: CreateProductRe
     missing_image_ids = set(requested_image_ids) - set(images_by_id)
     if missing_image_ids:
         raise ResourceNotFoundError(f"Images not found: {sorted(missing_image_ids)}")
+
+    payload.images.sort(key=lambda img: img.display_order or 0)
 
     try:
         product = await create_product_repo(session, payload)
@@ -193,9 +211,7 @@ async def update_product_variant_service(
         )
 
     if merged_compare_price < merged_price:
-        raise BadRequestError(
-            "compare_price must be greater than or equal to price"
-        )
+        raise BadRequestError("compare_price must be greater than or equal to price")
 
     existing = await get_product_variant_by_combo_repo(
         session,
@@ -244,3 +260,136 @@ async def delete_product_variant_service(
 
     await delete_product_variant_repo(session, variant)
     await session.commit()
+
+
+async def add_product_image_service(
+    session: AsyncSession, product_id: int, file: UploadFile
+):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    image_count = await count_product_images_repo(session, product_id)
+    if image_count >= MAX_IMAGES_PER_PRODUCT:
+        raise BadRequestError(
+            f"A product can have at most {MAX_IMAGES_PER_PRODUCT} images"
+        )
+
+    image = await upload_image_service(session, file, commit=False)
+    file_id = image.file_id
+
+    try:
+        display_order = (await get_max_display_order_repo(session, product_id)) + 1
+        product_image = await create_product_image_repo(
+            session,
+            product_id,
+            image,
+            display_order,
+            is_primary=image_count == 0,
+        )
+
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        await delete_imagekit_file(file_id)
+        raise
+
+    refreshed = await get_product_image_by_id_repo(session, product_image.id)
+    assert refreshed is not None
+    return refreshed
+
+
+async def delete_product_image_service(
+    session: AsyncSession, product_id: int, product_image_id: int
+):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    product_image = await get_product_image_by_id_repo(session, product_image_id)
+    if product_image is None:
+        raise ResourceNotFoundError("Product image not found")
+
+    if product_image.product_id != product_id:
+        raise BadRequestError("This image does not belong to this product")
+
+    promote = None
+    if product_image.is_primary:
+        promote = await get_lowest_order_product_image_repo(
+            session, product_id, product_image.id
+        )
+
+    try:
+        await delete_imagekit_file(product_image.image.file_id)
+        await delete_product_image_repo(session, product_image)
+        await session.flush()
+        await delete_image_repo(session, product_image.image)
+        await shift_product_images_repo(
+            session, product_id, product_image.display_order, -1
+        )
+        if promote is not None:
+            promote.is_primary = True
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+
+async def update_product_image_service(
+    session: AsyncSession,
+    product_id: int,
+    product_image_id: int,
+    payload: UpdateProductImageRequest,
+):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    product_image = await get_product_image_by_id_repo(session, product_image_id)
+    if product_image is None:
+        raise ResourceNotFoundError("Product image not found")
+
+    if product_image.product_id != product_id:
+        raise BadRequestError("This image does not belong to this product")
+
+    data = payload.model_dump(exclude_unset=True)
+    data = {key: value for key, value in data.items() if value is not None}
+
+    try:
+        if "is_primary" in data:
+            if data["is_primary"]:
+                await unset_primary_image_repo(session, product_id)
+                product_image.is_primary = True
+            elif product_image.is_primary:
+                raise BadRequestError("First make some other image primary")
+
+        if (
+            "display_order" in data
+            and product_image.display_order != data["display_order"]
+        ):
+            max_order = await get_max_display_order_repo(session, product_id)
+            new_order = data["display_order"]
+            prev_order = product_image.display_order
+
+            if new_order > max_order:
+                raise BadRequestError("New display order is greater than the max order")
+
+            if new_order < prev_order:
+                await shift_product_images_repo(
+                    session, product_id, new_order - 1, 1, prev_order - 1
+                )
+            else:
+                await shift_product_images_repo(
+                    session, product_id, prev_order, -1, new_order
+                )
+
+            product_image.display_order = new_order
+
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+
+    refreshed = await get_product_image_by_id_repo(session, product_image.id)
+    assert refreshed is not None
+    return refreshed

@@ -2,6 +2,7 @@ from enum import Enum
 
 MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
 MAX_IMAGES_PER_REQUEST = 10
+MAX_IMAGES_PER_PRODUCT = 10
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 IMAGEKIT_FOLDER = "/products"
 

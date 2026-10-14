@@ -18,9 +18,7 @@ class CreateProductVariantRequest(BaseModel):
     @model_validator(mode="after")
     def validate_price(self) -> "CreateProductVariantRequest":
         if self.compare_price < self.price:
-            raise ValueError(
-                "compare_price must be greater than or equal to price"
-            )
+            raise ValueError("compare_price must be greater than or equal to price")
 
         return self
 
@@ -73,9 +71,10 @@ class ProductVariantResponse(BaseModel):
 class ProductImageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    display_order: int
-    is_primary: bool
-    image: ImageResponse
+    id: int = Field(description="Unique product-image link identifier.")
+    display_order: int = Field(description="Position of the image in the gallery (0-based).")
+    is_primary: bool = Field(description="Whether this is the product's cover image.")
+    image: ImageResponse = Field(description="The linked image record.")
 
 
 class ProductResponse(BaseModel):
@@ -128,8 +127,24 @@ class UpdateProductVariantRequest(BaseModel):
             and self.compare_price is not None
             and self.compare_price < self.price
         ):
-            raise ValueError(
-                "compare_price must be greater than or equal to price"
-            )
+            raise ValueError("compare_price must be greater than or equal to price")
+
+        return self
+
+
+class UpdateProductImageRequest(BaseModel):
+    is_primary: bool | None = Field(
+        default=None, description="Whether this is the product's cover image."
+    )
+    display_order: int | None = Field(
+        default=None,
+        ge=0,
+        description="New 0-based position of the image in the gallery.",
+    )
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self) -> "UpdateProductImageRequest":
+        if self.is_primary is None and self.display_order is None:
+            raise ValueError("At least one of is_primary or display_order is required")
 
         return self

@@ -2,7 +2,8 @@ import itertools
 
 import pytest
 
-from app.utils.constants import HTTP_RESPONSE_MESSAGES
+from app.db.models.product import Product, ProductType, ProductVariant, SizeUnit
+from app.utils.constants import HTTP_RESPONSE_MESSAGES, MAX_IMAGES_PER_PRODUCT
 
 CATEGORY_URL = "/api/v1/admin/categories/"
 IMAGE_URL = "/api/v1/admin/images/"
@@ -548,3 +549,353 @@ async def test_list_products_pagination_metadata(client, fake_imagekit):
     assert pagination["total_pages"] == 2
     assert pagination["has_next"] is True
     assert pagination["has_prev"] is False
+
+
+async def _create_bare_product(db_session, client):
+    category_id = await _create_category(client)
+    product = Product(
+        title=f"Bare {next(_seq)}",
+        ingredients="x",
+        details="y",
+        is_active=True,
+        category_id=category_id,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    db_session.add(
+        ProductVariant(
+            product_id=product.id,
+            size=10,
+            unit=SizeUnit.CM,
+            product_type=ProductType.PERFUME,
+            price=10,
+            compare_price=20,
+            stock=1,
+        )
+    )
+    await db_session.commit()
+    return product.id
+
+
+async def _add_product_image(
+    client,
+    product_id,
+    *,
+    filename="b.png",
+    content=PNG_BYTES,
+    content_type="image/png",
+):
+    return await client.post(
+        f"{PRODUCT_URL}{product_id}/images",
+        files=[("file", (filename, content, content_type))],
+    )
+
+
+async def _get_product_images(client, product_id):
+    response = await client.get(f"{PRODUCT_URL}{product_id}")
+    assert response.status_code == 200
+    return response.json()["data"]["images"]
+
+
+def _orders_by_id(images):
+    return {image["id"]: image["display_order"] for image in images}
+
+
+async def test_add_product_image_success(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await _add_product_image(client, product["id"])
+
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["is_primary"] is False
+    assert data["display_order"] == 1
+    assert data["image"]["id"] is not None
+    assert data["image"]["url"]
+
+
+async def test_add_product_image_first_image_becomes_primary(
+    client, fake_imagekit, db_session
+):
+    product_id = await _create_bare_product(db_session, client)
+
+    response = await _add_product_image(client, product_id)
+
+    assert response.status_code == 201
+    assert response.json()["data"]["is_primary"] is True
+
+
+async def test_add_product_image_product_not_found(client, fake_imagekit):
+    response = await _add_product_image(client, 999)
+
+    assert response.status_code == 404
+
+
+async def test_add_product_image_invalid_file_returns_400(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await _add_product_image(
+        client,
+        product["id"],
+        filename="bad.txt",
+        content=b"not-an-image",
+        content_type="text/plain",
+    )
+
+    assert response.status_code == 400
+
+
+async def test_add_product_image_requires_file(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await client.post(f"{PRODUCT_URL}{product['id']}/images")
+
+    assert response.status_code == 422
+
+
+async def test_add_product_image_enforces_max_limit(client, fake_imagekit):
+    product = await _create_product(client)
+    current = len(await _get_product_images(client, product["id"]))
+
+    while current < MAX_IMAGES_PER_PRODUCT:
+        response = await _add_product_image(client, product["id"])
+        assert response.status_code == 201
+        current += 1
+
+    response = await _add_product_image(client, product["id"])
+
+    assert response.status_code == 400
+    assert len(await _get_product_images(client, product["id"])) == MAX_IMAGES_PER_PRODUCT
+
+
+async def test_add_product_image_cleans_up_on_failure(
+    client, fake_imagekit, monkeypatch
+):
+    product = await _create_product(client)
+    initial = len(await _get_product_images(client, product["id"]))
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.services.product.create_product_image_repo", _boom)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await _add_product_image(client, product["id"])
+
+    fake_imagekit.files.delete.assert_awaited()
+    assert len(await _get_product_images(client, product["id"])) == initial
+
+
+async def test_delete_product_image_success(client, fake_imagekit):
+    product = await _create_product(client)
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+
+    response = await client.delete(
+        f"{PRODUCT_URL}{product['id']}/images/{added['id']}"
+    )
+
+    assert response.status_code == 204
+    fake_imagekit.files.delete.assert_awaited()
+    images = await _get_product_images(client, product["id"])
+    assert len(images) == 1
+    assert _orders_by_id(images) == {images[0]["id"]: 0}
+
+
+async def test_delete_primary_image_promotes_next(client, fake_imagekit):
+    product = await _create_product(client)
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+    primary_id = next(
+        image["id"]
+        for image in await _get_product_images(client, product["id"])
+        if image["is_primary"]
+    )
+
+    response = await client.delete(
+        f"{PRODUCT_URL}{product['id']}/images/{primary_id}"
+    )
+
+    assert response.status_code == 204
+    images = await _get_product_images(client, product["id"])
+    assert len(images) == 1
+    assert images[0]["id"] == added["id"]
+    assert images[0]["is_primary"] is True
+
+
+async def test_delete_product_image_not_found(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await client.delete(f"{PRODUCT_URL}{product['id']}/images/999")
+
+    assert response.status_code == 404
+
+
+async def test_delete_product_image_wrong_product_returns_400(
+    client, fake_imagekit
+):
+    product_a = await _create_product(client, title="Alpha")
+    product_b = await _create_product(client, title="Beta")
+    added_b = (await _add_product_image(client, product_b["id"])).json()["data"]
+
+    response = await client.delete(
+        f"{PRODUCT_URL}{product_a['id']}/images/{added_b['id']}"
+    )
+
+    assert response.status_code == 400
+
+
+async def test_update_product_image_set_primary(client, fake_imagekit):
+    product = await _create_product(client)
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{added['id']}",
+        json={"is_primary": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["is_primary"] is True
+    assert response.json()["data"]["image"]["id"] == added["image"]["id"]
+
+    images = await _get_product_images(client, product["id"])
+    primaries = [image for image in images if image["is_primary"]]
+    assert len(primaries) == 1
+    assert primaries[0]["id"] == added["id"]
+
+
+async def test_update_product_image_unset_primary_on_non_primary_is_noop(
+    client, fake_imagekit
+):
+    product = await _create_product(client)
+    original_primary = next(
+        image["id"]
+        for image in await _get_product_images(client, product["id"])
+        if image["is_primary"]
+    )
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{added['id']}",
+        json={"is_primary": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["is_primary"] is False
+
+    images = await _get_product_images(client, product["id"])
+    primaries = [image for image in images if image["is_primary"]]
+    assert len(primaries) == 1
+    assert primaries[0]["id"] == original_primary
+
+
+async def test_update_product_image_unset_primary_returns_400(client, fake_imagekit):
+    product = await _create_product(client)
+    primary_id = next(
+        image["id"]
+        for image in await _get_product_images(client, product["id"])
+        if image["is_primary"]
+    )
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{primary_id}",
+        json={"is_primary": False},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_update_product_image_reorder_backward(client, fake_imagekit):
+    product = await _create_product(client)
+    await _add_product_image(client, product["id"])
+    await _add_product_image(client, product["id"])
+
+    images = sorted(
+        await _get_product_images(client, product["id"]),
+        key=lambda image: image["display_order"],
+    )
+    first_id = images[0]["id"]
+    last_id = images[-1]["id"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{last_id}",
+        json={"display_order": 0},
+    )
+
+    assert response.status_code == 200
+    updated = _orders_by_id(await _get_product_images(client, product["id"]))
+    assert updated[last_id] == 0
+    assert updated[first_id] == 1
+
+
+async def test_update_product_image_reorder_forward(client, fake_imagekit):
+    product = await _create_product(client)
+    await _add_product_image(client, product["id"])
+    await _add_product_image(client, product["id"])
+
+    images = sorted(
+        await _get_product_images(client, product["id"]),
+        key=lambda image: image["display_order"],
+    )
+    first_id = images[0]["id"]
+    last_id = images[-1]["id"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{first_id}",
+        json={"display_order": 2},
+    )
+
+    assert response.status_code == 200
+    updated = _orders_by_id(await _get_product_images(client, product["id"]))
+    assert updated[first_id] == 2
+    assert updated[last_id] == 1
+
+
+async def test_update_product_image_order_out_of_range_returns_400(
+    client, fake_imagekit
+):
+    product = await _create_product(client)
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{added['id']}",
+        json={"display_order": 5},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_update_product_image_empty_payload_returns_422(
+    client, fake_imagekit
+):
+    product = await _create_product(client)
+    added = (await _add_product_image(client, product["id"])).json()["data"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/{added['id']}", json={}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_update_product_image_not_found(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product['id']}/images/999", json={"is_primary": True}
+    )
+
+    assert response.status_code == 404
+
+
+async def test_update_product_image_wrong_product_returns_400(
+    client, fake_imagekit
+):
+    product_a = await _create_product(client, title="Alpha")
+    product_b = await _create_product(client, title="Beta")
+    added_b = (await _add_product_image(client, product_b["id"])).json()["data"]
+
+    response = await client.patch(
+        f"{PRODUCT_URL}{product_a['id']}/images/{added_b['id']}",
+        json={"is_primary": True},
+    )
+
+    assert response.status_code == 400

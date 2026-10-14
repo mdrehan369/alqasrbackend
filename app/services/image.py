@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import FileUploadError, InvalidFileError
 from app.core.imagekit import imagekit_client
 from app.db.models.image import Image
-from app.repo.image import create_images_repo
+from app.repo.image import create_image_repo, create_images_repo
 from app.utils.constants import (
     ALLOWED_IMAGE_TYPES,
     IMAGEKIT_FOLDER,
@@ -62,6 +62,13 @@ async def delete_imagekit_files(file_ids: list[str]) -> None:
             logger.warning("Failed to delete ImageKit file %s", file_id, exc_info=True)
 
 
+async def delete_imagekit_file(file_id: str) -> None:
+    try:
+        await imagekit_client.files.delete(file_id)
+    except Exception:
+        logger.warning("Failed to delete ImageKit file %s", file_id, exc_info=True)
+
+
 async def upload_images_service(
     session: AsyncSession, files: list[UploadFile]
 ) -> list[Image]:
@@ -105,4 +112,43 @@ async def upload_images_service(
         await delete_imagekit_files(
             [response.file_id for response in upload_responses if response.file_id]
         )
+        raise
+
+
+async def upload_image_service(
+    session: AsyncSession, file: UploadFile, *, commit: bool = True
+) -> Image:
+    if not file:
+        raise InvalidFileError("No image found")
+
+    file_name, content = await _validate_and_read(file)
+
+    upload_response: FileUploadResponse | None = None
+    try:
+        response = await imagekit_client.files.upload(
+            file=content,
+            file_name=file_name,
+            folder=IMAGEKIT_FOLDER,
+        )
+
+        if response.file_id is None:
+            raise FileUploadError("ImageKit returned an invalid upload response")
+
+        upload_response = response
+    except Exception as exc:
+        if upload_response is not None and upload_response.file_id is not None:
+            await delete_imagekit_file(upload_response.file_id)
+        if isinstance(exc, FileUploadError):
+            raise
+        raise FileUploadError("Failed to upload image") from exc
+
+    try:
+        image = await create_image_repo(session, upload_response)
+        if commit:
+            await session.commit()
+        return image
+    except Exception:
+        await session.rollback()
+        if upload_response.file_id is not None:
+            await delete_imagekit_file(upload_response.file_id)
         raise

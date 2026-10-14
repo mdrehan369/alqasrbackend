@@ -1,6 +1,6 @@
 import math
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse, ErrorResponse
@@ -10,17 +10,22 @@ from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
     OnlyProductResponse,
+    ProductImageResponse,
     ProductResponse,
     ProductVariantResponse,
+    UpdateProductImageRequest,
     UpdateProductRequest,
     UpdateProductVariantRequest,
 )
 from app.services.product import (
+    add_product_image_service,
     create_product_service,
     create_product_variant_service,
+    delete_product_image_service,
     delete_product_variant_service,
     get_product_service,
     get_products_service,
+    update_product_image_service,
     update_product_service,
     update_product_variant_service,
 )
@@ -269,3 +274,116 @@ async def delete_product_variant_controller(
     session: AsyncSession = Depends(get_db),
 ):
     await delete_product_variant_service(session, product_id, variant_id)
+
+
+@router.post(
+    "/{product_id}/images",
+    status_code=HTTP_STATUS_CODES.CREATED.value,
+    response_model=ApiResponse[ProductImageResponse],
+    summary="Add a product image",
+    description=(
+        "Uploads an image to the ImageKit media library and links it to the "
+        "given product's gallery. The first image added to a product becomes its "
+        "primary image automatically. A product can hold at most "
+        "MAX_IMAGES_PER_PRODUCT images."
+    ),
+    response_description="The created product-image link with its image details.",
+    responses={
+        HTTP_STATUS_CODES.BAD_REQUEST.value: {
+            "model": ErrorResponse,
+            "description": (
+                "The file is empty, unsupported, oversized, or the product "
+                "already reached its image limit."
+            ),
+        },
+        HTTP_STATUS_CODES.RESOURCE_NOT_FOUND.value: {
+            "model": ErrorResponse,
+            "description": "No product exists with the given id.",
+        },
+    },
+)
+async def add_product_image_controller(
+    product_id: int = Path(ge=1, description="Id of the parent product."),
+    file: UploadFile = File(
+        ..., description="Image file (jpeg, png or webp, max 5MB)."
+    ),
+    session: AsyncSession = Depends(get_db),
+):
+    product_image = await add_product_image_service(session, product_id, file)
+
+    return ApiResponse[ProductImageResponse](
+        message=HTTP_RESPONSE_MESSAGES.CREATED.value,
+        data=ProductImageResponse.model_validate(product_image),
+    )
+
+
+@router.delete(
+    "/{product_id}/images/{product_image_id}",
+    status_code=HTTP_STATUS_CODES.NO_CONTENT.value,
+    summary="Delete a product image",
+    description=(
+        "Removes an image from a product's gallery and deletes it from the "
+        "ImageKit media library. Gallery order is reindexed, and if the deleted "
+        "image was primary the next image is promoted to primary."
+    ),
+    responses={
+        HTTP_STATUS_CODES.BAD_REQUEST.value: {
+            "model": ErrorResponse,
+            "description": "The image does not belong to the given product.",
+        },
+        HTTP_STATUS_CODES.RESOURCE_NOT_FOUND.value: {
+            "model": ErrorResponse,
+            "description": "The product or product image could not be found.",
+        },
+    },
+)
+async def delete_product_image_controller(
+    product_id: int = Path(ge=1, description="Id of the parent product."),
+    product_image_id: int = Path(
+        ge=1, description="Id of the product image to delete."
+    ),
+    session: AsyncSession = Depends(get_db),
+):
+    await delete_product_image_service(session, product_id, product_image_id)
+
+
+@router.patch(
+    "/{product_id}/images/{product_image_id}",
+    status_code=HTTP_STATUS_CODES.SUCCESS.value,
+    response_model=ApiResponse[ProductImageResponse],
+    summary="Update a product image",
+    description=(
+        "Marks the image as the product's primary image and/or moves it to a new "
+        "0-based position in the gallery. Exactly one image stays primary; "
+        "unsetting primary directly is not allowed."
+    ),
+    response_description="The updated product-image link with its image details.",
+    responses={
+        HTTP_STATUS_CODES.BAD_REQUEST.value: {
+            "model": ErrorResponse,
+            "description": (
+                "The image does not belong to the product, an attempt was made to "
+                "unset the primary image, or the display order is out of range."
+            ),
+        },
+        HTTP_STATUS_CODES.RESOURCE_NOT_FOUND.value: {
+            "model": ErrorResponse,
+            "description": "The product or product image could not be found.",
+        },
+    },
+)
+async def update_product_image_controller(
+    payload: UpdateProductImageRequest,
+    product_id: int = Path(ge=1, description="Id of the parent product."),
+    product_image_id: int = Path(
+        ge=1, description="Id of the product image to update."
+    ),
+    session: AsyncSession = Depends(get_db),
+):
+    product_image = await update_product_image_service(
+        session, product_id, product_image_id, payload
+    )
+    return ApiResponse[ProductImageResponse](
+        message=HTTP_RESPONSE_MESSAGES.UPDATED.value,
+        data=ProductImageResponse.model_validate(product_image),
+    )
