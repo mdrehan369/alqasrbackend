@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = Field(default=...)
     jwt_access_token_expire_minutes: int = Field(default=...)
 
+    allowed_origins: list[str] = Field(default=["http://localhost:5000"])
+
     # Read configuration from a local .env file
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
