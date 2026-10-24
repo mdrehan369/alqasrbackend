@@ -1,4 +1,3 @@
-from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +13,7 @@ from app.repo.image import (
     create_product_image_repo,
     create_product_images_repo,
     delete_image_repo,
-    delete_product_image_repo,
+    get_image_by_id_repo,
     get_images_by_ids_repo,
     get_lowest_order_product_image_repo,
     get_max_display_order_repo,
@@ -38,11 +37,12 @@ from app.repo.product import (
 from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
+    ProductsListFilters,
     UpdateProductImageRequest,
     UpdateProductRequest,
     UpdateProductVariantRequest,
 )
-from app.services.image import delete_imagekit_file, upload_image_service
+from app.services.image import delete_imagekit_file
 from app.utils.constants import MAX_IMAGES_PER_PRODUCT
 
 
@@ -58,6 +58,13 @@ async def create_product_service(session: AsyncSession, payload: CreateProductRe
 
     requested_image_ids = [item.image_id for item in payload.images]
     images = await get_images_by_ids_repo(session, requested_image_ids)
+
+    for img in images:
+        if img.is_assigned:
+            raise BadRequestError(
+                f"Image with url ${img.url} is already assigned to other entity"
+            )
+
     images_by_id = {image.id: image for image in images}
 
     missing_image_ids = set(requested_image_ids) - set(images_by_id)
@@ -72,6 +79,8 @@ async def create_product_service(session: AsyncSession, payload: CreateProductRe
         await create_product_images_repo(
             session, product.id, images_by_id, payload.images
         )
+        for key, val in images_by_id.items():
+            val.is_assigned = True
         await session.commit()
     except Exception:
         await session.rollback()
@@ -83,9 +92,9 @@ async def create_product_service(session: AsyncSession, payload: CreateProductRe
 
 
 async def get_products_service(
-    session: AsyncSession, page: int, limit: int, search: str
+    session: AsyncSession, page: int, limit: int, product_filters: ProductsListFilters
 ):
-    result, total = await get_products_repo(session, page, limit, search)
+    result, total = await get_products_repo(session, page, limit, product_filters)
     return result, total
 
 
@@ -108,44 +117,56 @@ async def update_product_service(
     data = {key: value for key, value in data.items() if value is not None}
 
     if "title" in data:
-        new_title = data["title"]
-        if not new_title.strip():
+        title = data["title"]
+        if title.strip() == "":
             raise BadRequestError("Product title cannot be blank")
-
-        if new_title.lower() != product.title.lower():
-            product_with_new_title = await get_product_by_title_repo(session, new_title)
-            if product_with_new_title is not None:
-                raise ConflictError("Product with this title already exists")
-
-            product.title = new_title
-
-    if "category_id" in data:
-        new_category_id = data["category_id"]
-        if new_category_id != product.category_id:
-            cat = await get_category_by_id_repo(session, new_category_id)
-            if cat is None:
-                raise ResourceNotFoundError("Category not found")
-
-            product.category_id = new_category_id
+        existing = await get_product_by_title_repo(session, title)
+        if existing is not None and existing.id != product.id:
+            raise ConflictError("Product with this title already exists")
+        product.title = title
 
     if "ingredients" in data:
+        if data["ingredients"].strip() == "":
+            raise BadRequestError("Product ingredients cannot be blank")
         product.ingredients = data["ingredients"]
 
     if "details" in data:
+        if data["details"].strip() == "":
+            raise BadRequestError("Product details cannot be blank")
         product.details = data["details"]
 
     if "is_active" in data:
         product.is_active = data["is_active"]
 
+    if "category_id" in data:
+        category = await get_category_by_id_repo(session, data["category_id"])
+        if category is None:
+            raise ResourceNotFoundError("Category not found")
+        product.category_id = data["category_id"]
+
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise ConflictError("Product update conflicts with existing data") from None
+        raise ConflictError("Product with this title already exists")
 
     await session.refresh(product)
+    full = await get_full_product_by_id_repo(session, product.id)
+    assert full is not None
+    return full
 
-    return product
+
+async def delete_product_service(session: AsyncSession, product_id: int):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    try:
+        await session.delete(product)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
 
 
 async def create_product_variant_service(
@@ -155,25 +176,30 @@ async def create_product_variant_service(
     if product is None:
         raise ResourceNotFoundError("Product not found")
 
+    if payload.compare_price < payload.price:
+        raise BadRequestError("compare_price must be greater than or equal to price")
+
     existing = await get_product_variant_by_combo_repo(
         session, product_id, payload.size, payload.unit, payload.product_type
     )
     if existing is not None:
         raise ConflictError(
-            "Product variant with this size, unit and type already exists"
+            "Product variant with this size/unit/type already exists for this product"
         )
 
-    variant = await create_product_variant_repo(session, product_id, payload)
     try:
+        variant = await create_product_variant_repo(session, product_id, payload)
         await session.commit()
     except IntegrityError:
         await session.rollback()
         raise ConflictError(
-            "Product variant with this size, unit and type already exists"
-        ) from None
+            "Product variant with this size/unit/type already exists for this product"
+        )
+    except Exception:
+        await session.rollback()
+        raise
 
     await session.refresh(variant)
-
     return variant
 
 
@@ -183,6 +209,10 @@ async def update_product_variant_service(
     variant_id: int,
     payload: UpdateProductVariantRequest,
 ):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
     variant = await get_product_variant_by_id_and_product_repo(
         session, variant_id, product_id
     )
@@ -194,145 +224,135 @@ async def update_product_variant_service(
 
     merged_size = data.get("size", variant.size)
     merged_unit = data.get("unit", variant.unit)
-    merged_product_type = data.get("product_type", variant.product_type)
+    merged_type = data.get("product_type", variant.product_type)
     merged_price = data.get("price", variant.price)
-    merged_compare_price = data.get("compare_price", variant.compare_price)
-    merged_stock = data.get("stock", variant.stock)
+    merged_compare = data.get("compare_price", variant.compare_price)
 
-    if (
-        merged_size <= 0
-        or merged_price < 0
-        or merged_compare_price < 0
-        or merged_stock < 0
-    ):
-        raise BadRequestError(
-            "size must be greater than 0 and price, compare_price and stock "
-            "must be greater than or equal to 0"
-        )
-
-    if merged_compare_price < merged_price:
+    if merged_size <= 0:
+        raise BadRequestError("size must be greater than 0")
+    if merged_price < 0:
+        raise BadRequestError("price must be greater than or equal to 0")
+    if merged_compare < 0:
+        raise BadRequestError("compare_price must be greater than or equal to 0")
+    if merged_compare < merged_price:
         raise BadRequestError("compare_price must be greater than or equal to price")
 
-    existing = await get_product_variant_by_combo_repo(
-        session,
-        product_id,
-        merged_size,
-        merged_unit,
-        merged_product_type,
-        exclude_id=variant.id,
-    )
-    if existing is not None:
-        raise ConflictError(
-            "Product variant with this size, unit and type already exists"
-        )
+    if "size" in data and data["size"] <= 0:
+        raise BadRequestError("size must be greater than 0")
+    if "price" in data and data["price"] < 0:
+        raise BadRequestError("price must be greater than or equal to 0")
+    if "compare_price" in data and data["compare_price"] < 0:
+        raise BadRequestError("compare_price must be greater than or equal to 0")
+    if "stock" in data and data["stock"] < 0:
+        raise BadRequestError("stock must be greater than or equal to 0")
 
-    for key, value in data.items():
-        variant.__setattr__(key, value)
+    if "size" in data or "unit" in data or "product_type" in data:
+        existing = await get_product_variant_by_combo_repo(
+            session,
+            product_id,
+            merged_size,
+            merged_unit,
+            merged_type,
+            exclude_id=variant_id,
+        )
+        if existing is not None:
+            raise ConflictError(
+                "Product variant with this size/unit/type already exists for this product"
+            )
+
+    if "size" in data:
+        variant.size = data["size"]
+    if "unit" in data:
+        variant.unit = data["unit"]
+    if "product_type" in data:
+        variant.product_type = data["product_type"]
+    if "stock" in data:
+        variant.stock = data["stock"]
+    if "price" in data:
+        variant.price = data["price"]
+    if "compare_price" in data:
+        variant.compare_price = data["compare_price"]
 
     try:
         await session.commit()
     except IntegrityError:
         await session.rollback()
         raise ConflictError(
-            "Product variant with this size, unit and type already exists"
-        ) from None
+            "Product variant with this size/unit/type already exists for this product"
+        )
+    except Exception:
+        await session.rollback()
+        raise
 
     await session.refresh(variant)
-
     return variant
 
 
 async def delete_product_variant_service(
     session: AsyncSession, product_id: int, variant_id: int
 ):
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
     variant = await get_product_variant_by_id_and_product_repo(
         session, variant_id, product_id
     )
     if variant is None:
         raise ResourceNotFoundError("Product variant not found")
 
-    all_variants = await get_product_variants_by_product_repo(session, product_id)
+    variants = await get_product_variants_by_product_repo(session, product_id)
+    if len(variants) <= 1:
+        raise CannotDeleteError("Cannot delete the last variant of a product")
 
-    if len(all_variants) == 1:
-        raise CannotDeleteError(
-            "This is the last variant in the product. Add another variant and then delete this"
-        )
-
-    await delete_product_variant_repo(session, variant)
-    await session.commit()
+    try:
+        await delete_product_variant_repo(session, variant)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
 
 
 async def add_product_image_service(
-    session: AsyncSession, product_id: int, file: UploadFile
+    session: AsyncSession,
+    product_id: int,
+    image_id: int,
+    commit: bool = True,
 ):
     product = await get_product_by_id_repo(session, product_id)
     if product is None:
         raise ResourceNotFoundError("Product not found")
 
-    image_count = await count_product_images_repo(session, product_id)
-    if image_count >= MAX_IMAGES_PER_PRODUCT:
+    count = await count_product_images_repo(session, product_id)
+    if count >= MAX_IMAGES_PER_PRODUCT:
         raise BadRequestError(
-            f"A product can have at most {MAX_IMAGES_PER_PRODUCT} images"
+            f"Maximum {MAX_IMAGES_PER_PRODUCT} images allowed per product"
         )
 
-    image = await upload_image_service(session, file, commit=False)
-    file_id = image.file_id
+    image = await get_image_by_id_repo(session, image_id)
+    if not image:
+        raise ResourceNotFoundError("Image not found")
+
+    if image.is_assigned:
+        raise BadRequestError("This image is already assigned to some other entity")
 
     try:
-        display_order = (await get_max_display_order_repo(session, product_id)) + 1
-        product_image = await create_product_image_repo(
-            session,
-            product_id,
-            image,
-            display_order,
-            is_primary=image_count == 0,
-        )
-
-        await session.commit()
-    except Exception:
+        created = await create_product_image_repo(session, product_id, image_id, False)
+        image.is_assigned = True
+        if commit:
+            await session.commit()
+    except IntegrityError:
         await session.rollback()
-        await delete_imagekit_file(file_id)
-        raise
-
-    refreshed = await get_product_image_by_id_repo(session, product_image.id)
-    assert refreshed is not None
-    return refreshed
-
-
-async def delete_product_image_service(
-    session: AsyncSession, product_id: int, product_image_id: int
-):
-    product = await get_product_by_id_repo(session, product_id)
-    if product is None:
-        raise ResourceNotFoundError("Product not found")
-
-    product_image = await get_product_image_by_id_repo(session, product_image_id)
-    if product_image is None:
-        raise ResourceNotFoundError("Product image not found")
-
-    if product_image.product_id != product_id:
-        raise BadRequestError("This image does not belong to this product")
-
-    promote = None
-    if product_image.is_primary:
-        promote = await get_lowest_order_product_image_repo(
-            session, product_id, product_image.id
-        )
-
-    try:
-        await delete_imagekit_file(product_image.image.file_id)
-        await delete_product_image_repo(session, product_image)
-        await session.flush()
-        await delete_image_repo(session, product_image.image)
-        await shift_product_images_repo(
-            session, product_id, product_image.display_order, -1
-        )
-        if promote is not None:
-            promote.is_primary = True
-        await session.commit()
+        raise ConflictError("Image already linked to product")
     except Exception:
         await session.rollback()
         raise
+
+    try:
+        await session.refresh(created, attribute_names=["image"])
+    except Exception:
+        pass
+    return created
 
 
 async def update_product_image_service(
@@ -345,51 +365,107 @@ async def update_product_image_service(
     if product is None:
         raise ResourceNotFoundError("Product not found")
 
-    product_image = await get_product_image_by_id_repo(session, product_image_id)
-    if product_image is None:
+    link = await get_product_image_by_id_repo(session, product_image_id)
+    if link is None:
         raise ResourceNotFoundError("Product image not found")
 
-    if product_image.product_id != product_id:
-        raise BadRequestError("This image does not belong to this product")
+    if link.product_id != product_id:
+        raise BadRequestError("This image does not belongs to this product")
 
     data = payload.model_dump(exclude_unset=True)
-    data = {key: value for key, value in data.items() if value is not None}
+
+    new_primary = data.get("is_primary")
+    new_order = data.get("display_order")
+
+    if new_primary == False and len(data) == 1:
+        raise BadRequestError("Cannot unset primary status")
+
+    if new_primary == False and link.is_primary == False:
+        raise BadRequestError("The image is already not a primary image")
+
+    if new_primary is True:
+        await unset_primary_image_repo(session, product_id)
+
+    if new_order is not None:
+        max_order = await get_max_display_order_repo(session, product_id)
+        new_order = min(new_order, max_order)
+
+        if new_order < link.display_order:
+            await shift_product_images_repo(
+                session, product_id, new_order - 1, +1, link.display_order
+            )
+        elif new_order > link.display_order:
+            await shift_product_images_repo(
+                session, product_id, link.display_order, -1, new_order + 1
+            )
+        link.display_order = new_order
+
+    if new_primary is True:
+        link.is_primary = True
+    elif new_primary is False and link.is_primary:
+        raise BadRequestError("Cannot unset primary status")
 
     try:
-        if "is_primary" in data:
-            if data["is_primary"]:
-                await unset_primary_image_repo(session, product_id)
-                product_image.is_primary = True
-            elif product_image.is_primary:
-                raise BadRequestError("First make some other image primary")
-
-        if (
-            "display_order" in data
-            and product_image.display_order != data["display_order"]
-        ):
-            max_order = await get_max_display_order_repo(session, product_id)
-            new_order = data["display_order"]
-            prev_order = product_image.display_order
-
-            if new_order > max_order:
-                raise BadRequestError("New display order is greater than the max order")
-
-            if new_order < prev_order:
-                await shift_product_images_repo(
-                    session, product_id, new_order - 1, 1, prev_order - 1
-                )
-            else:
-                await shift_product_images_repo(
-                    session, product_id, prev_order, -1, new_order
-                )
-
-            product_image.display_order = new_order
-
         await session.commit()
     except Exception:
         await session.rollback()
         raise
 
-    refreshed = await get_product_image_by_id_repo(session, product_image.id)
-    assert refreshed is not None
-    return refreshed
+    await session.refresh(link)
+    try:
+        await session.refresh(link, attribute_names=["image"])
+    except Exception:
+        pass
+    return link
+
+
+async def delete_product_image_service(
+    session: AsyncSession,
+    product_id: int,
+    product_image_id: int,
+    commit: bool = True,
+):
+    """
+    If commit is set to false, be sure to delete the imagekit file as this function only deletes it when its set to true
+    """
+    product = await get_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    link = await get_product_image_by_id_repo(session, product_image_id)
+    if link is None:
+        raise ResourceNotFoundError("Product image not found")
+
+    if link.product_id != product_id:
+        raise BadRequestError("This image does not belongs to this product")
+
+    product_images_count = await count_product_images_repo(session, product_id)
+    if product_images_count == 1:
+        raise CannotDeleteError("This is the last image, it cannot be deleted")
+
+    was_primary = link.is_primary
+    image = link.image
+
+    if image is None:
+        raise BadRequestError("No image found!")
+
+    try:
+        await session.delete(link)
+        await delete_image_repo(session, image)
+        if was_primary:
+            lowest = await get_lowest_order_product_image_repo(session, product_id)
+            if lowest is not None:
+                lowest.is_primary = True
+        await shift_product_images_repo(session, product_id, link.display_order, -1)
+        if commit:
+            await session.commit()
+    except Exception:
+        await session.rollback()
+        print("Some error occured while deleting the imagekit file!")
+        raise
+
+    try:
+        if commit:
+            await delete_imagekit_file(image.file_id)
+    except Exception:
+        print("Imagekit deletion failed!")

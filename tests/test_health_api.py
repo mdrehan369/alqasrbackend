@@ -5,8 +5,8 @@ from app.utils.constants import HTTP_RESPONSE_MESSAGES
 
 settings = get_settings()
 
-LIVE_URL = "/health"
-READY_URL = "/health/ready"
+LIVE_URL = "/api/health"
+READY_URL = "/api/health/ready"
 
 
 class _BrokenSession:

@@ -1,5 +1,6 @@
 from app.db.models.product import Product
 from app.utils.constants import HTTP_RESPONSE_MESSAGES
+from app.utils.helpers import generate_random_string
 
 BASE_URL = "/api/v1/admin/categories/"
 
@@ -102,9 +103,7 @@ async def test_update_category_rejects_duplicate_name(client):
     await _create_category(client, "perfumes")
     category_id = await _create_category(client, "aatr")
 
-    response = await client.patch(
-        f"{BASE_URL}{category_id}", json={"name": "PERFUMES"}
-    )
+    response = await client.patch(f"{BASE_URL}{category_id}", json={"name": "PERFUMES"})
 
     assert response.status_code == 409
     body = response.json()
@@ -145,6 +144,7 @@ async def _seed_product(db_session, category_id: int) -> None:
             ingredients="Oud, Musk",
             details="A rich fragrance",
             category_id=category_id,
+            slug=generate_random_string(),
         )
     )
     await db_session.commit()

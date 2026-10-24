@@ -8,6 +8,7 @@ from app.core.api_response import ApiResponse, ErrorResponse
 from app.db.session import get_db
 from app.schemas.category import (
     CategoryResponse,
+    CategoryResponseWithProductCnt,
     CreateCategoryRequest,
     UpdateCategoryRequest,
 )
@@ -15,6 +16,7 @@ from app.schemas.pagination import PaginatedResponse, Pagination
 from app.services.category import (
     create_category_service,
     delete_category_service,
+    get_all_categories_service,
     get_categories_service,
     update_category_service,
 )
@@ -52,7 +54,7 @@ async def create_category_controller(
 @router.get(
     "/",
     status_code=HTTP_STATUS_CODES.SUCCESS.value,
-    response_model=ApiResponse[PaginatedResponse[CategoryResponse]],
+    response_model=ApiResponse[PaginatedResponse[CategoryResponseWithProductCnt]],
     summary="List categories",
     description=(
         "Returns a paginated list of categories, optionally filtered by a "
@@ -73,9 +75,9 @@ async def get_categories_controller(
     result, total = await get_categories_service(session, page, limit, search)
     total_pages = math.ceil(total / limit) if total else 0
 
-    return ApiResponse[PaginatedResponse[CategoryResponse]](
+    return ApiResponse[PaginatedResponse[CategoryResponseWithProductCnt]](
         data=PaginatedResponse(
-            items=[CategoryResponse.model_validate(c) for c in result],
+            items=[CategoryResponseWithProductCnt.model_validate(c) for c in result],
             pagination=Pagination(
                 page=page,
                 limit=limit,
@@ -144,3 +146,26 @@ async def delete_category_controller(
     session: AsyncSession = Depends(get_db),
 ):
     await delete_category_service(session, category_id)
+
+
+@router.get(
+    "/all",
+    status_code=HTTP_STATUS_CODES.SUCCESS.value,
+    response_model=ApiResponse[list[CategoryResponse]],
+    summary="Get all categories with search param great for dropdowns",
+    description=(
+        "Returns a list of all categories, optionally filtered by a "
+        "case-insensitive name prefix. Great for dropdowns"
+    ),
+    response_description="A page of all categories with the optional search filter.",
+)
+async def get_all_categories_controller(
+    session: AsyncSession = Depends(get_db),
+    search: str = Query(
+        default="", max_length=100, description="Case-insensitive name prefix filter."
+    ),
+):
+    result = await get_all_categories_service(session, search)
+    return ApiResponse[list[CategoryResponse]](
+        data=[CategoryResponse.model_validate(c) for c in result]
+    )

@@ -37,12 +37,14 @@ class Product(Base):
     __table_args__ = (
         CheckConstraint("length(trim(title)) > 0", name="ck_product_title_not_blank"),
         Index("ix_product_category_id", "category_id"),
+        Index("ix_product_slug", "slug"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(100), unique=True)
     ingredients: Mapped[str] = mapped_column(String())
     details: Mapped[str] = mapped_column(String())
+    slug: Mapped[str] = mapped_column(String(15), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean(), default=True)
 
     category_id: Mapped[int] = mapped_column(
@@ -121,4 +123,4 @@ class Category(Base):
     products: Mapped[list["Product"]] = relationship(back_populates="category")
 
 
-from app.db.models.image import ProductImage  # noqa: E402, F401
+from app.db.models.image import ProductImage

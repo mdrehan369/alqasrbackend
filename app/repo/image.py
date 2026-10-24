@@ -47,6 +47,11 @@ async def get_images_by_ids_repo(
     return list(await session.scalars(stmt))
 
 
+async def get_image_by_id_repo(session: AsyncSession, image_id: int) -> Image | None:
+    stmt = select(Image).where(Image.id == image_id)
+    return await session.scalar(stmt)
+
+
 async def create_product_images_repo(
     session: AsyncSession,
     product_id: int,
@@ -74,13 +79,14 @@ async def create_product_images_repo(
 async def create_product_image_repo(
     session: AsyncSession,
     product_id: int,
-    image: Image,
-    display_order: int,
+    image_id: int,
     is_primary: bool = False,
 ) -> ProductImage:
+    max_order = await get_max_display_order_repo(session, product_id)
+    display_order = (max_order + 1) if max_order >= 0 else 0
 
     product_image = ProductImage(
-        image_id=image.id,
+        image_id=image_id,
         product_id=product_id,
         display_order=display_order,
         is_primary=is_primary,
@@ -98,8 +104,10 @@ async def get_product_images_by_product_repo(session: AsyncSession, product_id: 
 
 
 async def count_product_images_repo(session: AsyncSession, product_id: int) -> int:
-    stmt = select(func.count()).select_from(ProductImage).where(
-        ProductImage.product_id == product_id
+    stmt = (
+        select(func.count())
+        .select_from(ProductImage)
+        .where(ProductImage.product_id == product_id)
     )
     return await session.scalar(stmt) or 0
 
@@ -149,13 +157,16 @@ async def shift_product_images_repo(
     by: int,
     to: int | None = None,
 ):
+    """
+    Excludes the from_display_order and to
+    """
     filters = [
         ProductImage.product_id == product_id,
         ProductImage.display_order > from_display_order,
     ]
 
     if to is not None:
-        filters.append(ProductImage.display_order <= to)
+        filters.append(ProductImage.display_order < to)
     stmt = (
         update(ProductImage)
         .where(*filters)

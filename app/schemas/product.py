@@ -1,10 +1,23 @@
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models.product import ProductType, SizeUnit
 from app.schemas.category import CategoryResponse
-from app.schemas.image import ImageResponse
+from app.schemas.image import ImageItemResponse, ImageResponse
+
+
+class SortOrder(Enum):
+    ASC = "asc"
+    DESC = "desc"
+
+
+class SearchableProductFields(str, Enum):
+    TITLE = "title"
+    DETAILS = "details"
+    INGREDIENTS = "ingredients"
+    CATEGORY = "category"
 
 
 class CreateProductVariantRequest(BaseModel):
@@ -72,9 +85,18 @@ class ProductImageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(description="Unique product-image link identifier.")
-    display_order: int = Field(description="Position of the image in the gallery (0-based).")
+    display_order: int = Field(
+        description="Position of the image in the gallery (0-based)."
+    )
     is_primary: bool = Field(description="Whether this is the product's cover image.")
     image: ImageResponse = Field(description="The linked image record.")
+
+
+class ProductImageItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(description="Unique product-image link identifier.")
+    image: ImageItemResponse = Field(description="The linked image record.")
 
 
 class ProductResponse(BaseModel):
@@ -88,8 +110,30 @@ class ProductResponse(BaseModel):
     category_id: int
     created_at: datetime
     category: CategoryResponse
-    variants: list[ProductVariantResponse]
-    images: list[ProductImageResponse]
+    slug: str
+    variants: list[ProductVariantResponse] = Field(
+        default_factory=list,
+        description="Representative variant for list view (one variant shown).",
+    )
+    images: list[ProductImageResponse] = Field(
+        default_factory=list,
+        description="Representative images for list view (primary image shown).",
+    )
+
+
+class ProductListItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    is_active: bool
+    created_at: datetime
+    category: CategoryResponse
+    slug: str
+    primary_image: ProductImageItemResponse
+    variant_count: int = Field(
+        default=0, description="Total number of variants for this product."
+    )
 
 
 class UpdateProductRequest(BaseModel):
@@ -148,3 +192,13 @@ class UpdateProductImageRequest(BaseModel):
             raise ValueError("At least one of is_primary or display_order is required")
 
         return self
+
+
+class ProductsListFilters(BaseModel):
+    sort_order: SortOrder = Field(
+        default=SortOrder.ASC
+    )  # only for the field created_at
+    category_ids: list[int] = Field(default=[])
+    is_active: bool | None = Field(default=None)
+    search: str | None = Field(default=None)
+    search_in: list[SearchableProductFields] = Field(default=[])

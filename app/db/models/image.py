@@ -29,12 +29,13 @@ class Image(Base):
     file_id: Mapped[str] = mapped_column(String(255), unique=True)
     url: Mapped[str] = mapped_column(String(500))
     file_path: Mapped[str] = mapped_column(String(500), unique=True)
+    is_assigned: Mapped[bool] = mapped_column(Boolean(), default=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-    product_images: Mapped[list["ProductImage"]] = relationship(
+    product_image: Mapped["ProductImage"] = relationship(
         back_populates="image", cascade="all, delete-orphan"
     )
 
@@ -42,7 +43,7 @@ class Image(Base):
 class ProductImage(Base):
     __tablename__ = TABLE_NAMES.PRODUCT_IMAGE.value
     __table_args__ = (
-        UniqueConstraint("product_id", "image_id", name="uq_product_image"),
+        UniqueConstraint("image_id", name="uq_product_image"),
         CheckConstraint("display_order >= 0", name="ck_product_image_order_nonneg"),
         Index("ix_product_image_product_id", "product_id"),
         Index("ix_product_image_image_id", "image_id"),
@@ -67,7 +68,7 @@ class ProductImage(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean(), default=False)
 
     product: Mapped["Product"] = relationship(back_populates="images")
-    image: Mapped["Image"] = relationship(back_populates="product_images")
+    image: Mapped["Image"] = relationship(back_populates="product_image")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

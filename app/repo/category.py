@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.product import Category
+from app.db.models.product import Category, Product
 from app.schemas.category import CreateCategoryRequest
 
 
@@ -26,20 +26,27 @@ async def get_categories_repo(
 ) -> tuple[list[Category], int]:
     filters = []
     if search:
-        filters.append(func.lower(Category.name).startswith(search.lower()))
+        filters.append(func.lower(Category.name).startswith(search.strip().lower()))
 
     total = await session.scalar(
         select(func.count()).select_from(Category).where(*filters)
     )
 
     stmt = (
-        select(Category)
+        select(Category, func.count(Product.id).label("product_count"))
+        .outerjoin(Product, Product.category_id == Category.id)
         .where(*filters)
+        .group_by(Category.id)
         .order_by(Category.id)
         .offset((page - 1) * limit)
         .limit(limit)
     )
-    categories = list(await session.scalars(stmt))
+    rows = await session.execute(stmt)
+    categories: list[Category] = []
+
+    for cat, cnt in rows:
+        cat.product_count = int(cnt or 0)  # type: ignore[attr-defined]
+        categories.append(cat)
 
     return categories, total or 0
 
@@ -59,3 +66,14 @@ async def get_category_by_id_repo(session: AsyncSession, id: int) -> Category | 
 async def delete_category_repo(session: AsyncSession, category: Category) -> None:
     await session.delete(category)
     await session.commit()
+
+
+async def get_all_categories_repo(session: AsyncSession, search: str | None):
+    filter = []
+    if search and search != "":
+        filter.append(func.lower(Category.name).startswith(search.lower()))
+
+    stmt = select(Category).where(*filter).order_by(Category.created_at)
+    categories = await session.scalars(stmt)
+
+    return categories

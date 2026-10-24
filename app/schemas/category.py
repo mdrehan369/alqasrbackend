@@ -19,6 +19,12 @@ class CategoryResponse(BaseModel):
     created_at: datetime = Field(description="Creation timestamp (UTC).")
 
 
+class CategoryResponseWithProductCnt(CategoryResponse):
+    product_count: int = Field(
+        default=0, description="Number of products in this category"
+    )
+
+
 class UpdateCategoryRequest(BaseModel):
     name: str | None = Field(
         default=None,
