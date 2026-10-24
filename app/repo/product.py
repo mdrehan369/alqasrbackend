@@ -3,7 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models.image import ProductImage
-from app.db.models.product import Product, ProductType, ProductVariant, SizeUnit
+from app.db.models.product import (
+    Product,
+    ProductType,
+    ProductVariant,
+    SizeUnit,
+)
 from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
@@ -87,7 +92,10 @@ async def create_product_variants_repo(
 
 
 async def get_products_repo(
-    session: AsyncSession, page: int, limit: int, product_filters: ProductsListFilters
+    session: AsyncSession,
+    page: int,
+    limit: int,
+    product_filters: ProductsListFilters,
 ) -> tuple[list[Product], int]:
     filters = []
     if (
@@ -207,3 +215,16 @@ async def get_product_variant_by_combo_repo(
 async def delete_product_variant_repo(session: AsyncSession, variant: ProductVariant):
     await session.delete(variant)
     await session.flush()
+
+
+async def get_full_product_by_slug_repo(session: AsyncSession, slug: str):
+    stmt = (
+        select(Product)
+        .where(Product.slug == slug)
+        .options(
+            selectinload(Product.variants),
+            selectinload(Product.images).selectinload(ProductImage.image),
+            selectinload(Product.category),
+        )
+    )
+    return await session.scalar(stmt)

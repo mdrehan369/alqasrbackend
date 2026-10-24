@@ -27,6 +27,7 @@ from app.repo.product import (
     create_product_variants_repo,
     delete_product_variant_repo,
     get_full_product_by_id_repo,
+    get_full_product_by_slug_repo,
     get_product_by_id_repo,
     get_product_by_title_repo,
     get_product_variant_by_combo_repo,
@@ -469,3 +470,11 @@ async def delete_product_image_service(
             await delete_imagekit_file(image.file_id)
     except Exception:
         print("Imagekit deletion failed!")
+
+
+async def get_product_by_slug_service(session: AsyncSession, slug: str):
+    product = await get_full_product_by_slug_repo(session, slug)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    return product

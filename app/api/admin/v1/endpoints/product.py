@@ -28,6 +28,7 @@ from app.services.product import (
     delete_product_image_service,
     delete_product_service,
     delete_product_variant_service,
+    get_product_by_slug_service,
     get_product_service,
     get_products_service,
     update_product_image_service,
@@ -421,3 +422,31 @@ async def delete_product_image_controller(
     session: AsyncSession = Depends(get_db),
 ):
     await delete_product_image_service(session, product_id, product_image_id)
+
+
+@router.get(
+    "/slug/{slug}",
+    status_code=HTTP_STATUS_CODES.SUCCESS.value,
+    response_model=ApiResponse[ProductResponse],
+    summary="Get a product",
+    description=(
+        "Returns a single product with its category, variants and linked images."
+    ),
+    response_description="The requested product.",
+    responses={
+        HTTP_STATUS_CODES.RESOURCE_NOT_FOUND.value: {
+            "model": ErrorResponse,
+            "description": "Product not found.",
+        },
+    },
+)
+async def get_product_by_slug_controller(
+    slug: str = Path(min_length=15, description="Id of the product to retrieve."),
+    session: AsyncSession = Depends(get_db),
+):
+    product = await get_product_by_slug_service(session, slug)
+
+    return ApiResponse[ProductResponse](
+        message=HTTP_RESPONSE_MESSAGES.SUCCESS.value,
+        data=ProductResponse.model_validate(product),
+    )

@@ -198,6 +198,20 @@ async def test_get_product_success(client, fake_imagekit):
     assert len(data["images"]) == 1
 
 
+async def test_get_product_by_slug_success(client, fake_imagekit):
+    product = await _create_product(client)
+
+    response = await client.get(f"{PRODUCT_URL}slug/{product['slug']}")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["id"] == product["id"]
+    assert data["title"] == "Rose Attar"
+    assert data["category"]["id"] == product["category_id"]
+    assert len(data["variants"]) == 1
+    assert len(data["images"]) == 1
+
+
 async def test_get_product_not_found(client, fake_imagekit):
     response = await client.get(f"{PRODUCT_URL}999")
 

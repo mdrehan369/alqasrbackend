@@ -8,7 +8,7 @@ from app.schemas.stats import DashboardBasicStatsResponse
 from app.services.stats import get_basic_dashboard_stats_service
 from app.utils.constants import HTTP_STATUS_CODES
 
-router = APIRouter(tags=["stats"], dependencies=[Depends(get_current_user_controller)])
+router = APIRouter(tags=["Stats"], dependencies=[Depends(get_current_user_controller)])
 
 
 @router.get(
