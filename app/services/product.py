@@ -381,9 +381,6 @@ async def update_product_image_service(
     if new_primary == False and len(data) == 1:
         raise BadRequestError("Cannot unset primary status")
 
-    if new_primary == False and link.is_primary == False:
-        raise BadRequestError("The image is already not a primary image")
-
     if new_primary is True:
         await unset_primary_image_repo(session, product_id)
 
