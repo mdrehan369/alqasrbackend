@@ -1,12 +1,22 @@
 from enum import Enum
 
-MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024
+from app.core.settings import get_settings
+
+settings = get_settings()
+
+MAX_IMAGE_SIZE_BYTES = (
+    5 * 1024 * 1024 if settings.app_env == "development" else 25 * 1024 * 1024
+)
 MAX_IMAGES_PER_REQUEST = 10
 MAX_IMAGES_PER_PRODUCT = 10
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
-IMAGEKIT_FOLDER = "/products"
+IMAGEKIT_FOLDER = (
+    "/development/products"
+    if settings.app_env == "development"
+    else "/production/products"
+)
 JWT_ALGORITHM = "HS256"
-HEALTH_CHECK_TIMEOUT_SECONDS = 3
+HEALTH_CHECK_TIMEOUT_SECONDS = 5
 
 
 class HEALTH_STATUS(Enum):

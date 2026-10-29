@@ -1,13 +1,35 @@
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.core.settings import get_settings
+from app.cron.delete_non_assigned import delete_non_assigned_images_cron
 
 from .api.admin.v1.router import api_router
 from .core.exception_handlers import register_exception_handlers
 
 settings = get_settings()
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Schedule job: runs every day at 02:00 AM UTC
+    scheduler.add_job(
+        delete_non_assigned_images_cron,
+        trigger=CronTrigger(hour=2, minute=0),
+        id="cleanup_expired_tokens",
+        replace_existing=True,
+    )
+
+    scheduler.start()
+    yield
+    scheduler.shutdown(wait=False)
+
 
 app = FastAPI(
     title=settings.app_name,

@@ -1,5 +1,5 @@
 from imagekitio.types import FileUploadResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -184,3 +184,11 @@ async def unset_primary_image_repo(session: AsyncSession, product_id: int):
         .values(is_primary=False)
     )
     await session.execute(stmt)
+
+
+async def get_all_non_assigned_images_repo(session: AsyncSession):
+    stmt = select(Image).where(
+        Image.is_assigned == False,
+        Image.created_at < func.now() - text("INTERVAL 2 hours"),
+    )
+    return list(await session.scalars(stmt))
