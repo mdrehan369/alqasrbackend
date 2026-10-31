@@ -9,7 +9,8 @@ from app.api.health import router as health_router
 from app.core.settings import get_settings
 from app.cron.delete_non_assigned import delete_non_assigned_images_cron
 
-from .api.admin.v1.router import api_router
+from .api.admin.v1.router import api_router as admin_api_router
+from .api.v1.router import api_router
 from .core.exception_handlers import register_exception_handlers
 
 settings = get_settings()
@@ -40,8 +41,12 @@ app = FastAPI(
     version=settings.app_version,
     openapi_tags=[
         {
-            "name": "Admin",
-            "description": "Administrative endpoints. Narrated under /api/v1/admin.",
+            "name": "Product",
+            "description": "Create and manage products with variants and images.",
+        },
+        {
+            "name": "Health",
+            "description": "Liveness and readiness probes for the service.",
         },
         {
             "name": "Category",
@@ -54,10 +59,6 @@ app = FastAPI(
         {
             "name": "Product",
             "description": "Create and manage products with variants and images.",
-        },
-        {
-            "name": "Health",
-            "description": "Liveness and readiness probes for the service.",
         },
     ],
 )
@@ -75,5 +76,6 @@ app.add_middleware(
 )
 register_exception_handlers(app)
 
+app.include_router(admin_api_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
 app.include_router(api_router, prefix="/api")

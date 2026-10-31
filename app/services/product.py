@@ -475,3 +475,25 @@ async def get_product_by_slug_service(session: AsyncSession, slug: str):
         raise ResourceNotFoundError("Product not found")
 
     return product
+
+
+async def get_active_product_service(session: AsyncSession, product_id: int):
+    product = await get_full_product_by_id_repo(session, product_id)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    if product.is_active == False:
+        raise BadRequestError("This product is not active!")
+
+    return product
+
+
+async def get_active_product_by_slug_service(session: AsyncSession, slug: str):
+    product = await get_full_product_by_slug_repo(session, slug)
+    if product is None:
+        raise ResourceNotFoundError("Product not found")
+
+    if product.is_active == False:
+        raise BadRequestError("This product is not active!")
+
+    return product

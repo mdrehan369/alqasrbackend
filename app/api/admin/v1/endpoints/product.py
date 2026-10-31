@@ -441,7 +441,7 @@ async def delete_product_image_controller(
     },
 )
 async def get_product_by_slug_controller(
-    slug: str = Path(min_length=15, description="Id of the product to retrieve."),
+    slug: str = Path(min_length=15, description="Slug of the product to retrieve."),
     session: AsyncSession = Depends(get_db),
 ):
     product = await get_product_by_slug_service(session, slug)
