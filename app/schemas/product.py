@@ -13,6 +13,12 @@ class SortOrder(Enum):
     DESC = "desc"
 
 
+class SortBy(Enum):
+    MIN_PRICE = "min_price"
+    MAX_PRICE = "max_price"
+    CREATED_AT = "created_at"
+
+
 class SearchableProductFields(str, Enum):
     TITLE = "title"
     DETAILS = "details"
@@ -202,3 +208,34 @@ class ProductsListFilters(BaseModel):
     is_active: bool | None = Field(default=None)
     search: str | None = Field(default=None)
     search_in: list[SearchableProductFields] = Field(default=[])
+
+
+class ProductListItemClientResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    short_detail: str
+    created_at: datetime
+    category: str
+    ingredients: str
+    slug: str
+    min_price: int
+    max_price: int
+    compare_price: int
+    total_stock: int
+    image_url: str
+    image_id: int
+    variant_count: int = Field(
+        default=0, description="Total number of variants for this product."
+    )
+
+
+class ProductsListFiltersClient(BaseModel):
+    sort_order: SortOrder = Field(default=SortOrder.ASC)
+    sort_by: SortBy = Field(default=SortBy.CREATED_AT)
+    category_ids: list[int] = Field(default=[])
+    search: str | None = Field(default=None)
+    product_types: list[ProductType] = Field(
+        default=[ProductType.AATR, ProductType.PERFUME]
+    )

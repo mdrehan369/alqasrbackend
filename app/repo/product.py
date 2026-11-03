@@ -1,9 +1,12 @@
+from operator import and_
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models.image import ProductImage
+from app.db.models.image import Image, ProductImage
 from app.db.models.product import (
+    Category,
     Product,
     ProductType,
     ProductVariant,
@@ -13,6 +16,8 @@ from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
     ProductsListFilters,
+    ProductsListFiltersClient,
+    SortBy,
     SortOrder,
 )
 from app.utils.helpers import generate_random_string
@@ -228,3 +233,74 @@ async def get_full_product_by_slug_repo(session: AsyncSession, slug: str):
         )
     )
     return await session.scalar(stmt)
+
+
+async def get_products_for_client_repo(
+    session: AsyncSession,
+    page: int,
+    limit: int,
+    filters: ProductsListFiltersClient,
+):
+    where_conditions = [
+        Product.is_active.is_(True),
+        ProductVariant.stock > 0,
+        ProductVariant.product_type.in_(filters.product_types),
+        Product.title.ilike(f"%{filters.search}%"),
+    ]
+    if len(filters.category_ids) > 0:
+        where_conditions.append(Category.id.in_(filters.category_ids))
+
+    count_stmt = (
+        select(func.count(func.distinct(Product.id)))
+        .join(ProductVariant, Product.id == ProductVariant.product_id)
+        .join(Category, Product.category_id == Category.id)
+        .where(*where_conditions)
+    )
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    min_price = func.min(ProductVariant.price).label("min_price")
+    order_by_field = (
+        min_price if filters.sort_by == SortBy.MIN_PRICE else Product.created_at
+    )
+    order_by = (
+        order_by_field.desc()
+        if filters.sort_order == SortOrder.DESC
+        else order_by_field.asc()
+    )
+
+    stmt = (
+        select(
+            Product.id,
+            Product.title,
+            Product.ingredients,
+            Product.category_id,
+            Product.slug,
+            Product.created_at,
+            func.max(Category.name).label("category"),
+            func.left(Product.details, 20).label("short_detail"),
+            func.sum(ProductVariant.stock).label("total_stock"),
+            min_price,
+            func.max(ProductVariant.compare_price).label("compare_price"),
+            func.max(ProductVariant.price).label("max_price"),
+            func.count(ProductVariant.id).label("variant_count"),
+            func.max(ProductImage.image_id).label("image_id"),
+            func.max(Image.url).label("image_url"),
+        )
+        .join(ProductVariant, Product.id == ProductVariant.product_id)
+        .join(Category, Product.category_id == Category.id)
+        .outerjoin(
+            ProductImage,
+            and_(
+                Product.id == ProductImage.product_id,
+                ProductImage.is_primary.is_(True),
+            ),
+        )
+        .outerjoin(Image, ProductImage.image_id == Image.id)
+        .where(*where_conditions)
+        .group_by(Product.id)
+        .order_by(order_by)
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    results = (await session.execute(stmt)).mappings().all()
+    return results, total or 0

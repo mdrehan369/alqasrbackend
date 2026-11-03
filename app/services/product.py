@@ -33,12 +33,14 @@ from app.repo.product import (
     get_product_variant_by_combo_repo,
     get_product_variant_by_id_and_product_repo,
     get_product_variants_by_product_repo,
+    get_products_for_client_repo,
     get_products_repo,
 )
 from app.schemas.product import (
     CreateProductRequest,
     CreateProductVariantRequest,
     ProductsListFilters,
+    ProductsListFiltersClient,
     UpdateProductImageRequest,
     UpdateProductRequest,
     UpdateProductVariantRequest,
@@ -497,3 +499,12 @@ async def get_active_product_by_slug_service(session: AsyncSession, slug: str):
         raise BadRequestError("This product is not active!")
 
     return product
+
+
+async def get_products_for_client_service(
+    session: AsyncSession,
+    page: int,
+    limit: int,
+    product_filters: ProductsListFiltersClient,
+):
+    return await get_products_for_client_repo(session, page, limit, product_filters)

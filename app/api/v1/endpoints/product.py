@@ -4,19 +4,20 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_response import ApiResponse, ErrorResponse
+from app.db.models.product import ProductType
 from app.db.session import get_db
 from app.schemas.pagination import PaginatedResponse, Pagination
 from app.schemas.product import (
-    ProductListItemResponse,
+    ProductListItemClientResponse,
     ProductResponse,
-    ProductsListFilters,
-    SearchableProductFields,
+    ProductsListFiltersClient,
+    SortBy,
     SortOrder,
 )
 from app.services.product import (
     get_active_product_by_slug_service,
     get_active_product_service,
-    get_products_service,
+    get_products_for_client_service,
 )
 from app.utils.constants import HTTP_RESPONSE_MESSAGES, HTTP_STATUS_CODES
 
@@ -26,7 +27,7 @@ router = APIRouter(tags=["Product"])
 @router.get(
     "/",
     status_code=HTTP_STATUS_CODES.SUCCESS.value,
-    response_model=ApiResponse[PaginatedResponse[ProductListItemResponse]],
+    response_model=ApiResponse[PaginatedResponse[ProductListItemClientResponse]],
     summary="List products",
     description=(
         "Returns a paginated list of products, optionally filtered by a "
@@ -41,11 +42,7 @@ async def get_products_controller(
         default=10, ge=1, le=100, description="Number of items per page (max 100)."
     ),
     search: str = Query(
-        default=None, max_length=100, description="Case-insensitive prefix filter."
-    ),
-    search_in: list[SearchableProductFields] = Query(
-        default=[SearchableProductFields.TITLE],
-        description="Search in array to look for specified fields",
+        default="", max_length=100, description="Case-insensitive prefix filter."
     ),
     category_ids: list[int] = Query(
         default=[], description="The categories to search for"
@@ -54,20 +51,30 @@ async def get_products_controller(
         default=SortOrder.ASC,
         description="The sort order for the field created_at",
     ),
+    sort_by: SortBy = Query(
+        default=SortBy.CREATED_AT,
+        description="The sort by field for the query",
+    ),
+    product_types: list[ProductType] = Query(
+        default=[ProductType.AATR, ProductType.PERFUME],
+        description="The product types included",
+    ),
 ):
-    product_filters = ProductsListFilters(
+    product_filters = ProductsListFiltersClient(
         sort_order=sort_order,
         search=search,
-        search_in=search_in,
         category_ids=category_ids,
-        is_active=True,
+        sort_by=sort_by,
+        product_types=product_types,
     )
-    result, total = await get_products_service(session, page, limit, product_filters)
+    results, total = await get_products_for_client_service(
+        session, page, limit, product_filters
+    )
     total_pages = math.ceil(total / limit) if total else 0
 
-    return ApiResponse[PaginatedResponse[ProductListItemResponse]](
+    return ApiResponse[PaginatedResponse[ProductListItemClientResponse]](
         data=PaginatedResponse(
-            items=[ProductListItemResponse.model_validate(c) for c in result],
+            items=[ProductListItemClientResponse.model_validate(c) for c in results],
             pagination=Pagination(
                 page=page,
                 limit=limit,

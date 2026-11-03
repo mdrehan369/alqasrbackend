@@ -77,3 +77,20 @@ async def get_all_categories_repo(session: AsyncSession, search: str | None):
     categories = await session.scalars(stmt)
 
     return categories
+
+
+async def get_all_categories_with_product_cnt_repo(session: AsyncSession):
+    stmt = (
+        select(Category, func.count(Product.id).label("product_count"))
+        .outerjoin(Product, Product.category_id == Category.id)
+        .group_by(Category.id)
+        .order_by(Category.id)
+    )
+    rows = await session.execute(stmt)
+    categories: list[Category] = []
+
+    for cat, cnt in rows:
+        cat.product_count = int(cnt or 0)  # type: ignore[attr-defined]
+        categories.append(cat)
+
+    return categories

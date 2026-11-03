@@ -11,6 +11,7 @@ from app.repo.category import (
     create_category_repo,
     delete_category_repo,
     get_all_categories_repo,
+    get_all_categories_with_product_cnt_repo,
     get_categories_repo,
     get_category_by_id_repo,
     update_category_repo,
@@ -86,4 +87,9 @@ async def delete_category_service(session: AsyncSession, category_id: int):
 
 async def get_all_categories_service(session: AsyncSession, search: str | None):
     categories = await get_all_categories_repo(session, search)
+    return categories
+
+
+async def get_all_categories_with_product_count_service(session: AsyncSession):
+    categories = await get_all_categories_with_product_cnt_repo(session)
     return categories
