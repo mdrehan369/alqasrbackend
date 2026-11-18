@@ -7,6 +7,6 @@ wheels/
 *.egg-info
 .env
 .env.docker
-
+/logs
 # Virtual environments
 .venv
